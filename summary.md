@@ -1,1 +1,1 @@
-Phase 1 complete: Kysely schema, DB client, migration, CRUD queries (items/attributes/linkages/types), Dolt auto-commit wrapper, error types, 18 passing integration tests.
+Phase 2 (REST API) complete: Hono app with all CRUD routes, attribute filtering, include params, optimistic locking, and integration tests — 45 tests passing.

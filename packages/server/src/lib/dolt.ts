@@ -2,6 +2,16 @@ import type { Kysely } from "kysely";
 import { sql } from "kysely";
 import type { Database } from "../db/schema.ts";
 
+/** Get current HEAD commit hash. */
+export async function doltHead(db: Kysely<Database>): Promise<string> {
+	const result = await sql<{ hash: string }>`
+		SELECT DOLT_HASHOF('HEAD') AS hash
+	`.execute(db);
+	const row = result.rows[0];
+	if (!row) throw new Error("DOLT_HASHOF returned no result");
+	return row.hash;
+}
+
 /** Execute a Dolt commit with a message. Returns the commit hash. */
 export async function doltCommit(
 	db: Kysely<Database>,
