@@ -1,4 +1,4 @@
-# datastore
+# vds
 
 To install dependencies:
 

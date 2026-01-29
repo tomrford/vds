@@ -1,12 +1,22 @@
 {
-  "name": "datastore",
-  "module": "index.ts",
-  "type": "module",
-  "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  }
+	"name": "vds",
+	"module": "index.ts",
+	"type": "module",
+	"private": true,
+	"scripts": {
+		"check": "biome check .",
+		"check:fix": "biome check --fix .",
+		"lint": "biome lint .",
+		"lint:fix": "biome lint --fix .",
+		"format": "biome format .",
+		"format:fix": "biome format --fix .",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.3.13",
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	}
 }
