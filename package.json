@@ -1,8 +1,7 @@
 {
 	"name": "vds",
-	"module": "index.ts",
-	"type": "module",
 	"private": true,
+	"workspaces": ["packages/*"],
 	"scripts": {
 		"check": "biome check .",
 		"check:fix": "biome check --fix .",
@@ -10,7 +9,8 @@
 		"lint:fix": "biome lint --fix .",
 		"format": "biome format .",
 		"format:fix": "biome format --fix .",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "bash scripts/test.sh"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.13",
