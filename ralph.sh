@@ -7,7 +7,7 @@ STATUS_FILE="status.md"
 for ((i = 1; i <= MAX_ITERATIONS; i++)); do
     echo "=== Iteration $i/$MAX_ITERATIONS ==="
 
-    cat prompt.md | claude --dangerously-skip-permissions
+    cat prompt.md | claude --dangerously-skip-permissions --print
 
     if [[ -f "summary.md" ]]; then
         echo "--- Summary: $(cat summary.md)"
