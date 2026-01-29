@@ -1,1 +1,1 @@
-Phase 2 (REST API) complete: Hono app with all CRUD routes, attribute filtering, include params, optimistic locking, and integration tests — 45 tests passing.
+Phase 3 (MCP) complete: MCP server with all 18 tools (items, attributes, attribute types, linkages, linkage types) using @modelcontextprotocol/sdk + zod v4 + stdio transport.

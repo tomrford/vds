@@ -8,8 +8,10 @@
 		"test": "bun test"
 	},
 	"dependencies": {
+		"@modelcontextprotocol/sdk": "1.25.3",
 		"hono": "^4",
 		"kysely": "^0.27",
-		"mysql2": "^3"
+		"mysql2": "^3",
+		"zod": "4.3.6"
 	}
 }
