@@ -317,6 +317,71 @@ describe("linkages", () => {
 	});
 });
 
+describe("history", () => {
+	let itemId: string;
+
+	beforeAll(async () => {
+		const r: Any = await jsonBody(await post("/items", { body: "history test" }));
+		itemId = r.id;
+		// Make a second commit by updating
+		await app.request(`/items/${itemId}`, {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "history updated" }),
+		});
+	});
+
+	test("GET /history — lists commits", async () => {
+		const res = await req("/history");
+		expect(res.status).toBe(200);
+		const data: Any = await jsonBody(res);
+		expect(data.length).toBeGreaterThanOrEqual(2);
+		expect(data[0].hash).toBeTruthy();
+		expect(data[0].message).toBeTruthy();
+		expect(data[0].date).toBeTruthy();
+	});
+
+	test("GET /history?limit=2", async () => {
+		const res = await req("/history?limit=2");
+		const data: Any = await jsonBody(res);
+		expect(data.length).toBeLessThanOrEqual(2);
+	});
+
+	test("GET /history/:commit — get commit details", async () => {
+		const logRes = await req("/history?limit=1");
+		const log: Any = await jsonBody(logRes);
+		const hash = log[0].hash;
+
+		const res = await req(`/history/${hash}`);
+		expect(res.status).toBe(200);
+		const data: Any = await jsonBody(res);
+		expect(data.hash).toBe(hash);
+		expect(data.message).toBeTruthy();
+	});
+
+	test("GET /history/:commit — 404 for unknown", async () => {
+		const res = await req("/history/0000000000000000000000000000000000000000");
+		expect(res.status).toBe(404);
+	});
+
+	test("GET /items/:id/history — item change history", async () => {
+		const res = await req(`/items/${itemId}/history`);
+		expect(res.status).toBe(200);
+		const data: Any = await jsonBody(res);
+		expect(data.length).toBeGreaterThanOrEqual(1);
+		// Should include commits that touched this item
+		for (const commit of data) {
+			expect(commit.hash).toBeTruthy();
+			expect(commit.message).toBeTruthy();
+		}
+	});
+
+	test("GET /items/:id/history — 404 for unknown item", async () => {
+		const res = await req("/items/nonexistent/history");
+		expect(res.status).toBe(404);
+	});
+});
+
 describe("optimistic locking", () => {
 	test("If-Match with stale hash returns 409", async () => {
 		const res = await app.request("/items", {

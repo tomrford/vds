@@ -1,1 +1,1 @@
-Phase 3 (MCP) complete: MCP server with all 18 tools (items, attributes, attribute types, linkages, linkage types) using @modelcontextprotocol/sdk + zod v4 + stdio transport.
+All 4 phases complete: Phase 4 History implemented — commit list/details/item-history queries, REST routes, MCP tools, integration tests (51 pass).

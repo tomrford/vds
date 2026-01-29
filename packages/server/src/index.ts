@@ -1,6 +1,13 @@
 export { createDb } from "./db/client.ts";
 export { migrate } from "./db/migrate.ts";
-export { doltCommit, doltHead, withAutoCommit } from "./lib/dolt.ts";
+export {
+	doltCommit,
+	doltHead,
+	withAutoCommit,
+	doltLog,
+	doltCommitDetails,
+	doltItemHistory,
+} from "./lib/dolt.ts";
 export { createApp } from "./api/app.ts";
 export { createMcpServer, startMcpServer } from "./mcp/server.ts";
 export {

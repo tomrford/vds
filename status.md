@@ -1,4 +1,4 @@
-Status: In Progress
+Status: Done
 
 ## Memory
 
@@ -11,11 +11,14 @@ Status: In Progress
 - Phase 1: COMPLETE — schema, client, errors, dolt auto-commit, CRUD queries, migrate, tests
 - Phase 2: COMPLETE — Hono app, all REST routes, attribute filtering, include param, optimistic locking (If-Match/ETag), integration tests
 - Phase 3: COMPLETE — MCP server (McpServer + StdioServerTransport), all 18 tools registered, zod v4 input schemas
+- Phase 4: COMPLETE — History endpoints (doltLog, doltCommitDetails, doltItemHistory), REST routes (GET /history, /history/:commit, /items/:id/history), 3 MCP tools (list_commits, get_commit, get_item_history), integration tests
 - mysql2: MUST use callback-based `mysql2` import, NOT `mysql2/promise` — Kysely MysqlDialect hangs with promise pool on Bun
 - Dolt 1.59: uses `CALL DOLT_COMMIT(...)` stored procedure, NOT `SELECT DOLT_COMMIT(...)` function
 - Dolt 1.59: `dolt sql-server` flags are `-H` (host) and `-P` (port), not `--host`/`--port`
 - Dolt 1.59: `dolt sql-server` does NOT support `-u`/`--user` flag
 - Dolt 1.59: `SELECT DOLT_HASHOF('HEAD') AS hash` for getting current HEAD hash
+- Dolt diff tables: `dolt_diff_$TABLE` uses `to_commit`/`from_commit` columns (not `commit_hash`) — join on `to_commit` for item history
+- Dolt log: `dolt_log` system table has `commit_hash`, `committer`, `message`, `date` columns
 - Tests: run via `nix develop -c bash scripts/test.sh` — script starts ephemeral Dolt server
 - Tests: Dolt database created as subdir named "vds" under --data-dir; DOLT_COMMIT needs proper Dolt-init'd database
 - Quality gate: `npx tsc --noEmit && npx biome lint . && nix develop -c bash scripts/test.sh`

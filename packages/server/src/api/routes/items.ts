@@ -3,7 +3,7 @@ import type { Env } from "../app.ts";
 import * as items from "../../db/queries/items.ts";
 import * as attributes from "../../db/queries/attributes.ts";
 import * as linkages from "../../db/queries/linkages.ts";
-import { doltHead, withAutoCommit } from "../../lib/dolt.ts";
+import { doltHead, doltItemHistory, withAutoCommit } from "../../lib/dolt.ts";
 
 export const itemRoutes = new Hono<Env>();
 
@@ -185,4 +185,19 @@ itemRoutes.get("/:id/linkages", async (c) => {
 	await items.getItem(db, id);
 	const result = await linkages.listLinkages(db, id, direction);
 	return c.json(result);
+});
+
+/** GET /items/:id/history — Get item's change history */
+itemRoutes.get("/:id/history", async (c) => {
+	const db = c.get("db");
+	const id = c.req.param("id");
+	const limit = c.req.query("limit");
+	const offset = c.req.query("offset");
+	// Verify item exists
+	await items.getItem(db, id);
+	const commits = await doltItemHistory(db, id, {
+		limit: limit ? Number(limit) : undefined,
+		offset: offset ? Number(offset) : undefined,
+	});
+	return c.json(commits);
 });

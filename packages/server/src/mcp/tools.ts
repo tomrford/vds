@@ -6,7 +6,12 @@ import * as attributes from "../db/queries/attributes.ts";
 import * as attributeTypes from "../db/queries/attribute-types.ts";
 import * as linkages from "../db/queries/linkages.ts";
 import * as linkageTypes from "../db/queries/linkage-types.ts";
-import { withAutoCommit } from "../lib/dolt.ts";
+import {
+	withAutoCommit,
+	doltLog,
+	doltCommitDetails,
+	doltItemHistory,
+} from "../lib/dolt.ts";
 import type { Database } from "../db/schema.ts";
 
 function text(data: unknown) {
@@ -251,5 +256,35 @@ export function registerTools(server: McpServer, db: Kysely<Database>) {
 			linkageTypes.deleteLinkageType(db, id),
 		);
 		return text({ deleted: id });
+	});
+
+	// ── History ───────────────────────────────────────────
+
+	server.registerTool("list_commits", {
+		description: "List Dolt commits (most recent first)",
+		inputSchema: {
+			limit: z.number().optional().describe("Max results (default 50)"),
+			offset: z.number().optional().describe("Skip N results"),
+		},
+	}, async ({ limit, offset }) => {
+		return text(await doltLog(db, { limit, offset }));
+	});
+
+	server.registerTool("get_commit", {
+		description: "Get details of a specific commit by hash",
+		inputSchema: { hash: z.string().describe("Commit hash") },
+	}, async ({ hash }) => {
+		return text(await doltCommitDetails(db, hash));
+	});
+
+	server.registerTool("get_item_history", {
+		description: "Get commits that changed a specific item",
+		inputSchema: {
+			item_id: z.string().describe("Item ID"),
+			limit: z.number().optional().describe("Max results (default 50)"),
+			offset: z.number().optional().describe("Skip N results"),
+		},
+	}, async ({ item_id, limit, offset }) => {
+		return text(await doltItemHistory(db, item_id, { limit, offset }));
 	});
 }
