@@ -40,24 +40,10 @@ export function registerTools(server: McpServer, db: Kysely<Database>) {
 			filters: z.record(z.string(), z.string()).optional().describe("Attribute filters as { typeName: value }"),
 		},
 	}, async ({ limit, offset, filters }) => {
-		let result = await items.listItems(db, { limit, offset });
-
-		if (filters && Object.keys(filters).length > 0) {
-			const types = await attributeTypes.listAttributeTypes(db);
-			const typeNameToId = new Map(types.map((t) => [t.name, t.id]));
-			const allAttrs = await Promise.all(
-				result.map((item) => attributes.listAttributes(db, item.id)),
-			);
-			result = result.filter((_item, i) => {
-				const itemAttrs = allAttrs[i] ?? [];
-				return Object.entries(filters).every(([name, value]) => {
-					const typeId = typeNameToId.get(name);
-					if (!typeId) return false;
-					return itemAttrs.some((a) => a.type_id === typeId && a.value === value);
-				});
-			});
-		}
-
+		const attrFilters = filters
+			? Object.entries(filters).map(([name, value]) => ({ name, value }))
+			: undefined;
+		const result = await items.listItems(db, { limit, offset, attrFilters });
 		return text(result);
 	});
 

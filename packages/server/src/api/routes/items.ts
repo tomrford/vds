@@ -3,7 +3,11 @@ import type { Env } from "../app.ts";
 import * as items from "../../db/queries/items.ts";
 import * as attributes from "../../db/queries/attributes.ts";
 import * as linkages from "../../db/queries/linkages.ts";
-import { doltHead, doltItemHistory, withAutoCommit } from "../../lib/dolt.ts";
+import {
+	doltHead,
+	doltItemHistory,
+	withAutoCommit,
+} from "../../lib/dolt.ts";
 
 export const itemRoutes = new Hono<Env>();
 
@@ -44,34 +48,11 @@ itemRoutes.get("/", async (c) => {
 		}
 	}
 
-	let result = await items.listItems(db, {
+	const result = await items.listItems(db, {
 		limit: limit ? Number(limit) : undefined,
 		offset: offset ? Number(offset) : undefined,
+		attrFilters: attrFilters.length > 0 ? attrFilters : undefined,
 	});
-
-	// Apply attribute filters by post-filtering
-	if (attrFilters.length > 0) {
-		const allAttributes = await Promise.all(
-			result.map((item) => attributes.listAttributes(db, item.id)),
-		);
-		// Need attribute type names — load types for matching
-		const { listAttributeTypes } = await import(
-			"../../db/queries/attribute-types.ts"
-		);
-		const types = await listAttributeTypes(db);
-		const typeNameToId = new Map(types.map((t) => [t.name, t.id]));
-
-		result = result.filter((_item, i) => {
-			const itemAttrs = allAttributes[i] ?? [];
-			return attrFilters.every((f) => {
-				const typeId = typeNameToId.get(f.name);
-				if (!typeId) return false;
-				return itemAttrs.some(
-					(a) => a.type_id === typeId && a.value === f.value,
-				);
-			});
-		});
-	}
 
 	return c.json(result);
 });

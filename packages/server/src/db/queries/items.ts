@@ -13,9 +13,32 @@ export async function createItem(
 
 export async function listItems(
 	db: Kysely<Database>,
-	opts?: { limit?: number; offset?: number },
+	opts?: {
+		limit?: number;
+		offset?: number;
+		attrFilters?: { name: string; value: string }[];
+	},
 ) {
-	let q = db.selectFrom("items").selectAll().orderBy("created_at", "desc");
+	let q = db.selectFrom("items").selectAll("items").orderBy("created_at", "desc");
+
+	for (const filter of opts?.attrFilters ?? []) {
+		q = q.where((eb) =>
+			eb.exists(
+				eb
+					.selectFrom("attributes")
+					.innerJoin(
+						"attribute_types",
+						"attribute_types.id",
+						"attributes.type_id",
+					)
+					.whereRef("attributes.item_id", "=", "items.id")
+					.where("attribute_types.name", "=", filter.name)
+					.where("attributes.value", "=", filter.value)
+					.select(eb.lit(1).as("one")),
+			),
+		);
+	}
+
 	if (opts?.limit) q = q.limit(opts.limit);
 	if (opts?.offset) q = q.offset(opts.offset);
 	return q.execute();
