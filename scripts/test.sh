@@ -27,4 +27,4 @@ for _ in $(seq 1 30); do
 done
 
 export VDS_TEST_PORT="$PORT"
-exec bun test "$@"
+bun test "$@"

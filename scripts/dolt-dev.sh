@@ -9,9 +9,9 @@ cd "$DATA_DIR"
 
 if [ ! -d ".dolt" ]; then
   echo "Initializing Dolt repo..."
-  dolt init
+  dolt init --name "Dev" --email "dev@dev.com"
   dolt sql -q "CREATE DATABASE IF NOT EXISTS vds"
 fi
 
 echo "Starting Dolt SQL server on port $PORT..."
-exec dolt sql-server -u root --port "$PORT"
+exec dolt sql-server --port "$PORT"
