@@ -1,276 +1,492 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import * as items from "../db/queries/items.ts";
-import * as attributes from "../db/queries/attributes.ts";
 import * as attributeTypes from "../db/queries/attribute-types.ts";
-import * as linkages from "../db/queries/linkages.ts";
+import * as attributes from "../db/queries/attributes.ts";
+import * as items from "../db/queries/items.ts";
 import * as linkageTypes from "../db/queries/linkage-types.ts";
-import {
-	withAutoCommit,
-	doltLog,
-	doltCommitDetails,
-	doltItemHistory,
-} from "../lib/dolt.ts";
+import * as linkages from "../db/queries/linkages.ts";
 import type { Database } from "../db/schema.ts";
+import { doltHead, withAutoCommit } from "../lib/dolt.ts";
+import {
+	AppError,
+	ConflictError,
+	InUseError,
+	NotFoundError,
+} from "../lib/errors.ts";
+import { type McpTextResult, mcpErr, mcpOk } from "./response.ts";
 
-function text(data: unknown) {
-	return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+function toMcpError(err: unknown): McpTextResult {
+	if (err instanceof InUseError) {
+		return mcpErr("IN_USE", err.message, err.details);
+	}
+	if (err instanceof NotFoundError) {
+		return mcpErr("NOT_FOUND", err.message, err.details);
+	}
+	if (err instanceof ConflictError) {
+		return mcpErr("CONFLICT", err.message, err.details);
+	}
+	if (err instanceof AppError) {
+		return mcpErr("BAD_REQUEST", err.message, err.details);
+	}
+	if (err instanceof Error) {
+		return mcpErr("INTERNAL", err.message);
+	}
+	return mcpErr("INTERNAL", "Unknown error");
+}
+
+async function handleMcp(
+	fn: () => Promise<McpTextResult>,
+): Promise<McpTextResult> {
+	try {
+		return await fn();
+	} catch (err) {
+		return toMcpError(err);
+	}
+}
+
+async function checkVersion(
+	db: Kysely<Database>,
+	version?: string,
+): Promise<string | null> {
+	if (!version) return null;
+	const head = await doltHead(db);
+	if (head !== version) return head;
+	return null;
 }
 
 export function registerTools(server: McpServer, db: Kysely<Database>) {
 	// ── Items ──────────────────────────────────────────────
 
-	server.registerTool("create_item", {
-		description: "Create a new item",
-		inputSchema: { body: z.string().describe("Item body text") },
-	}, async ({ body }) => {
-		const id = crypto.randomUUID();
-		const { result } = await withAutoCommit(db, `Create item ${id}`, () =>
-			items.createItem(db, id, body),
-		);
-		return text(result);
-	});
-
-	server.registerTool("list_items", {
-		description: "List items with optional pagination and attribute filters",
-		inputSchema: {
-			limit: z.number().optional().describe("Max results"),
-			offset: z.number().optional().describe("Skip N results"),
-			filters: z.record(z.string(), z.string()).optional().describe("Attribute filters as { typeName: value }"),
+	server.registerTool(
+		"create_item",
+		{
+			description: "Create a new item",
+			inputSchema: {
+				body: z.string().describe("Item body text"),
+				version: z.string().optional().describe("Expected HEAD commit hash"),
+			},
 		},
-	}, async ({ limit, offset, filters }) => {
-		const attrFilters = filters
-			? Object.entries(filters).map(([name, value]) => ({ name, value }))
-			: undefined;
-		const result = await items.listItems(db, { limit, offset, attrFilters });
-		return text(result);
-	});
-
-	server.registerTool("get_item", {
-		description: "Get an item by ID, optionally including attributes and linkages",
-		inputSchema: {
-			id: z.string().describe("Item ID"),
-			include: z.array(z.enum(["attributes", "linkages"])).optional()
-				.describe("Related data to include"),
+		async ({ body, version }) => {
+			return handleMcp(async () => {
+				const head = await checkVersion(db, version);
+				if (head) return mcpErr("CONFLICT", "Conflict", { head });
+				const id = crypto.randomUUID();
+				const { result, commitHash } = await withAutoCommit(
+					db,
+					`Create item ${id}`,
+					() => items.createItem(db, id, body),
+				);
+				return mcpOk(result, commitHash);
+			});
 		},
-	}, async ({ id, include }) => {
-		const item = await items.getItem(db, id);
-		const response: Record<string, unknown> = { ...item };
-		if (include?.includes("attributes")) {
-			response.attributes = await attributes.listAttributes(db, id);
-		}
-		if (include?.includes("linkages")) {
-			response.linkages = await linkages.listLinkages(db, id);
-		}
-		return text(response);
-	});
+	);
 
-	server.registerTool("update_item", {
-		description: "Update an item's body text",
-		inputSchema: {
-			id: z.string().describe("Item ID"),
-			body: z.string().describe("New body text"),
+	server.registerTool(
+		"list_items",
+		{
+			description: "List items with optional pagination and attribute filters",
+			inputSchema: {
+				limit: z.number().optional().describe("Max results"),
+				offset: z.number().optional().describe("Skip N results"),
+				filters: z
+					.record(z.string(), z.string())
+					.optional()
+					.describe("Attribute filters as { typeName: value }"),
+				as_of: z
+					.string()
+					.optional()
+					.describe("Commit hash or datetime for point-in-time read"),
+			},
 		},
-	}, async ({ id, body }) => {
-		const { result } = await withAutoCommit(db, `Update item ${id}`, () =>
-			items.updateItem(db, id, body),
-		);
-		return text(result);
-	});
-
-	server.registerTool("delete_item", {
-		description: "Delete an item and its attributes/linkages",
-		inputSchema: { id: z.string().describe("Item ID") },
-	}, async ({ id }) => {
-		await withAutoCommit(db, `Delete item ${id}`, () =>
-			items.deleteItem(db, id),
-		);
-		return text({ deleted: id });
-	});
-
-	// ── Attributes ────────────────────────────────────────
-
-	server.registerTool("list_attributes", {
-		description: "List attributes for an item",
-		inputSchema: { item_id: z.string().describe("Item ID") },
-	}, async ({ item_id }) => {
-		return text(await attributes.listAttributes(db, item_id));
-	});
-
-	server.registerTool("add_attribute", {
-		description: "Add an attribute to an item",
-		inputSchema: {
-			item_id: z.string().describe("Item ID"),
-			type_id: z.string().describe("Attribute type ID"),
-			value: z.string().describe("Attribute value"),
+		async ({ limit, offset, filters, as_of }) => {
+			return handleMcp(async () => {
+				const attrFilters = filters
+					? Object.entries(filters).map(([name, value]) => ({ name, value }))
+					: undefined;
+				const result = await items.listItems(db, {
+					limit,
+					offset,
+					attrFilters,
+					asOf: as_of,
+				});
+				const version = await doltHead(db);
+				return mcpOk(result, version);
+			});
 		},
-	}, async ({ item_id, type_id, value }) => {
-		const id = crypto.randomUUID();
-		const { result } = await withAutoCommit(
-			db,
-			`Add attribute to item ${item_id}`,
-			() => attributes.addAttribute(db, id, item_id, type_id, value),
-		);
-		return text(result);
-	});
+	);
 
-	server.registerTool("update_attribute", {
-		description: "Update an attribute's value",
-		inputSchema: {
-			id: z.string().describe("Attribute ID"),
-			value: z.string().describe("New value"),
+	server.registerTool(
+		"get_item",
+		{
+			description: "Get an item with its attributes and linkages",
+			inputSchema: {
+				id: z.string().describe("Item ID"),
+				as_of: z
+					.string()
+					.optional()
+					.describe("Commit hash or datetime for point-in-time read"),
+			},
 		},
-	}, async ({ id, value }) => {
-		const { result } = await withAutoCommit(
-			db,
-			`Update attribute ${id}`,
-			() => attributes.updateAttribute(db, id, value),
-		);
-		return text(result);
-	});
+		async ({ id, as_of }) => {
+			return handleMcp(async () => {
+				const item = await items.getItem(db, id, as_of);
+				const response = {
+					...item,
+					attributes: await attributes.listAttributes(db, id, as_of),
+					linkages: await linkages.listLinkagesForItem(db, id, "both", as_of),
+				};
+				const version = await doltHead(db);
+				return mcpOk(response, version);
+			});
+		},
+	);
 
-	server.registerTool("remove_attribute", {
-		description: "Remove an attribute",
-		inputSchema: { id: z.string().describe("Attribute ID") },
-	}, async ({ id }) => {
-		await withAutoCommit(db, `Remove attribute ${id}`, () =>
-			attributes.deleteAttribute(db, id),
-		);
-		return text({ deleted: id });
-	});
+	server.registerTool(
+		"update_item",
+		{
+			description: "Update an item: body, attributes, or both",
+			inputSchema: {
+				id: z.string().describe("Item ID"),
+				body: z.string().optional().describe("New body text"),
+				version: z.string().optional().describe("Expected HEAD commit hash"),
+				attributes: z
+					.object({
+						set: z
+							.array(
+								z.object({
+									type_id: z.string(),
+									value: z.string(),
+								}),
+							)
+							.optional(),
+						remove: z
+							.array(z.string())
+							.optional()
+							.describe("Attribute type_ids to remove"),
+					})
+					.optional(),
+			},
+		},
+		async ({ id, body, version, attributes: attrs }) => {
+			return handleMcp(async () => {
+				const setAttributes = attrs?.set ?? [];
+				const removeAttributes = attrs?.remove ?? [];
+				if (
+					body === undefined &&
+					setAttributes.length === 0 &&
+					removeAttributes.length === 0
+				) {
+					return mcpErr("BAD_REQUEST", "No updates provided");
+				}
+
+				const head = await checkVersion(db, version);
+				if (head) return mcpErr("CONFLICT", "Conflict", { head });
+
+				const { result, commitHash } = await withAutoCommit(
+					db,
+					`Update item ${id}`,
+					async () => {
+						if (body !== undefined) {
+							await items.updateItem(db, id, body);
+						} else {
+							await items.getItem(db, id);
+						}
+
+						for (const attr of setAttributes) {
+							await attributes.upsertAttribute(
+								db,
+								id,
+								attr.type_id,
+								attr.value,
+							);
+						}
+
+						if (removeAttributes.length > 0) {
+							await attributes.deleteAttributesByTypeIds(
+								db,
+								id,
+								removeAttributes,
+							);
+						}
+
+						return items.getItem(db, id);
+					},
+				);
+				return mcpOk(result, commitHash);
+			});
+		},
+	);
+
+	server.registerTool(
+		"delete_item",
+		{
+			description: "Delete an item and its attributes/linkages",
+			inputSchema: {
+				id: z.string().describe("Item ID"),
+				version: z.string().optional().describe("Expected HEAD commit hash"),
+			},
+		},
+		async ({ id, version }) => {
+			return handleMcp(async () => {
+				const head = await checkVersion(db, version);
+				if (head) return mcpErr("CONFLICT", "Conflict", { head });
+				const { commitHash } = await withAutoCommit(
+					db,
+					`Delete item ${id}`,
+					() => items.deleteItem(db, id),
+				);
+				return mcpOk({ deleted: id }, commitHash);
+			});
+		},
+	);
 
 	// ── Attribute Types ───────────────────────────────────
 
-	server.registerTool("list_attribute_types", {
-		description: "List all attribute types",
-		inputSchema: {},
-	}, async () => {
-		return text(await attributeTypes.listAttributeTypes(db));
-	});
+	server.registerTool(
+		"list_attribute_types",
+		{
+			description: "List all attribute types",
+			inputSchema: {
+				as_of: z
+					.string()
+					.optional()
+					.describe("Commit hash or datetime for point-in-time read"),
+			},
+		},
+		async ({ as_of }) => {
+			return handleMcp(async () => {
+				const result = await attributeTypes.listAttributeTypes(db, as_of);
+				const version = await doltHead(db);
+				return mcpOk(result, version);
+			});
+		},
+	);
 
-	server.registerTool("create_attribute_type", {
-		description: "Create a new attribute type",
-		inputSchema: { name: z.string().describe("Type name (unique)") },
-	}, async ({ name }) => {
-		const id = crypto.randomUUID();
-		const { result } = await withAutoCommit(
-			db,
-			`Create attribute type '${name}'`,
-			() => attributeTypes.createAttributeType(db, id, name),
-		);
-		return text(result);
-	});
+	server.registerTool(
+		"create_attribute_type",
+		{
+			description: "Create a new attribute type",
+			inputSchema: {
+				name: z.string().describe("Type name (unique)"),
+				version: z.string().optional().describe("Expected HEAD commit hash"),
+			},
+		},
+		async ({ name, version }) => {
+			return handleMcp(async () => {
+				const head = await checkVersion(db, version);
+				if (head) return mcpErr("CONFLICT", "Conflict", { head });
+				const id = crypto.randomUUID();
+				const { result, commitHash } = await withAutoCommit(
+					db,
+					`Create attribute type '${name}'`,
+					() => attributeTypes.createAttributeType(db, id, name),
+				);
+				return mcpOk(result, commitHash);
+			});
+		},
+	);
 
-	server.registerTool("delete_attribute_type", {
-		description: "Delete an attribute type (fails if in use)",
-		inputSchema: { id: z.string().describe("Attribute type ID") },
-	}, async ({ id }) => {
-		await withAutoCommit(db, `Delete attribute type ${id}`, () =>
-			attributeTypes.deleteAttributeType(db, id),
-		);
-		return text({ deleted: id });
-	});
+	server.registerTool(
+		"delete_attribute_type",
+		{
+			description: "Delete an attribute type (fails if in use)",
+			inputSchema: {
+				id: z.string().describe("Attribute type ID"),
+				version: z.string().optional().describe("Expected HEAD commit hash"),
+			},
+		},
+		async ({ id, version }) => {
+			return handleMcp(async () => {
+				const head = await checkVersion(db, version);
+				if (head) return mcpErr("CONFLICT", "Conflict", { head });
+				const { commitHash } = await withAutoCommit(
+					db,
+					`Delete attribute type ${id}`,
+					() => attributeTypes.deleteAttributeType(db, id),
+				);
+				return mcpOk({ deleted: id }, commitHash);
+			});
+		},
+	);
 
 	// ── Linkages ──────────────────────────────────────────
 
-	server.registerTool("list_linkages", {
-		description: "List linkages for an item",
-		inputSchema: {
-			item_id: z.string().describe("Item ID"),
-			direction: z.enum(["source", "target", "both"]).optional()
-				.describe("Filter by direction (default: both)"),
+	server.registerTool(
+		"list_linkages",
+		{
+			description: "List linkages with optional filters",
+			inputSchema: {
+				type_id: z.string().optional().describe("Linkage type ID"),
+				source_id: z.string().optional().describe("Source item ID"),
+				target_id: z.string().optional().describe("Target item ID"),
+				limit: z.number().optional().describe("Max results"),
+				offset: z.number().optional().describe("Skip N results"),
+				as_of: z
+					.string()
+					.optional()
+					.describe("Commit hash or datetime for point-in-time read"),
+			},
 		},
-	}, async ({ item_id, direction }) => {
-		return text(await linkages.listLinkages(db, item_id, direction));
-	});
-
-	server.registerTool("create_linkage", {
-		description: "Create a linkage between two items",
-		inputSchema: {
-			source_id: z.string().describe("Source item ID"),
-			target_id: z.string().describe("Target item ID"),
-			type_id: z.string().describe("Linkage type ID"),
+		async ({ type_id, source_id, target_id, limit, offset, as_of }) => {
+			return handleMcp(async () => {
+				const result = await linkages.listLinkages(db, {
+					typeId: type_id,
+					sourceId: source_id,
+					targetId: target_id,
+					limit,
+					offset,
+					asOf: as_of,
+				});
+				const version = await doltHead(db);
+				return mcpOk(result, version);
+			});
 		},
-	}, async ({ source_id, target_id, type_id }) => {
-		const id = crypto.randomUUID();
-		const { result } = await withAutoCommit(
-			db,
-			`Link ${source_id} -> ${target_id}`,
-			() => linkages.createLinkage(db, id, source_id, target_id, type_id),
-		);
-		return text(result);
-	});
+	);
 
-	server.registerTool("remove_linkage", {
-		description: "Remove a linkage",
-		inputSchema: { id: z.string().describe("Linkage ID") },
-	}, async ({ id }) => {
-		await withAutoCommit(db, `Remove linkage ${id}`, () =>
-			linkages.deleteLinkage(db, id),
-		);
-		return text({ deleted: id });
-	});
+	server.registerTool(
+		"create_linkages",
+		{
+			description: "Create one or more linkages between items",
+			inputSchema: {
+				linkages: z.array(
+					z.object({
+						source_id: z.string(),
+						target_id: z.string(),
+						type_id: z.string(),
+					}),
+				),
+				version: z.string().optional().describe("Expected HEAD commit hash"),
+			},
+		},
+		async ({ linkages: newLinkages, version }) => {
+			return handleMcp(async () => {
+				if (newLinkages.length === 0) {
+					return mcpErr("BAD_REQUEST", "No linkages provided");
+				}
+				const head = await checkVersion(db, version);
+				if (head) return mcpErr("CONFLICT", "Conflict", { head });
+				const { result, commitHash } = await withAutoCommit(
+					db,
+					"Create linkages",
+					async () => {
+						const created = [];
+						for (const linkage of newLinkages) {
+							const id = crypto.randomUUID();
+							created.push(
+								await linkages.createLinkage(
+									db,
+									id,
+									linkage.source_id,
+									linkage.target_id,
+									linkage.type_id,
+								),
+							);
+						}
+						return created;
+					},
+				);
+				return mcpOk(result, commitHash);
+			});
+		},
+	);
+
+	server.registerTool(
+		"remove_linkages",
+		{
+			description: "Remove one or more linkages by ID",
+			inputSchema: {
+				ids: z.array(z.string()),
+				version: z.string().optional().describe("Expected HEAD commit hash"),
+			},
+		},
+		async ({ ids, version }) => {
+			return handleMcp(async () => {
+				if (ids.length === 0) {
+					return mcpErr("BAD_REQUEST", "No linkages provided");
+				}
+				const head = await checkVersion(db, version);
+				if (head) return mcpErr("CONFLICT", "Conflict", { head });
+				const { commitHash } = await withAutoCommit(
+					db,
+					"Remove linkages",
+					async () => {
+						for (const id of ids) {
+							await linkages.deleteLinkage(db, id);
+						}
+					},
+				);
+				return mcpOk({ deleted: ids }, commitHash);
+			});
+		},
+	);
 
 	// ── Linkage Types ─────────────────────────────────────
 
-	server.registerTool("list_linkage_types", {
-		description: "List all linkage types",
-		inputSchema: {},
-	}, async () => {
-		return text(await linkageTypes.listLinkageTypes(db));
-	});
-
-	server.registerTool("create_linkage_type", {
-		description: "Create a new linkage type",
-		inputSchema: { name: z.string().describe("Type name (unique)") },
-	}, async ({ name }) => {
-		const id = crypto.randomUUID();
-		const { result } = await withAutoCommit(
-			db,
-			`Create linkage type '${name}'`,
-			() => linkageTypes.createLinkageType(db, id, name),
-		);
-		return text(result);
-	});
-
-	server.registerTool("delete_linkage_type", {
-		description: "Delete a linkage type (fails if in use)",
-		inputSchema: { id: z.string().describe("Linkage type ID") },
-	}, async ({ id }) => {
-		await withAutoCommit(db, `Delete linkage type ${id}`, () =>
-			linkageTypes.deleteLinkageType(db, id),
-		);
-		return text({ deleted: id });
-	});
-
-	// ── History ───────────────────────────────────────────
-
-	server.registerTool("list_commits", {
-		description: "List Dolt commits (most recent first)",
-		inputSchema: {
-			limit: z.number().optional().describe("Max results (default 50)"),
-			offset: z.number().optional().describe("Skip N results"),
+	server.registerTool(
+		"list_linkage_types",
+		{
+			description: "List all linkage types",
+			inputSchema: {
+				as_of: z
+					.string()
+					.optional()
+					.describe("Commit hash or datetime for point-in-time read"),
+			},
 		},
-	}, async ({ limit, offset }) => {
-		return text(await doltLog(db, { limit, offset }));
-	});
-
-	server.registerTool("get_commit", {
-		description: "Get details of a specific commit by hash",
-		inputSchema: { hash: z.string().describe("Commit hash") },
-	}, async ({ hash }) => {
-		return text(await doltCommitDetails(db, hash));
-	});
-
-	server.registerTool("get_item_history", {
-		description: "Get commits that changed a specific item",
-		inputSchema: {
-			item_id: z.string().describe("Item ID"),
-			limit: z.number().optional().describe("Max results (default 50)"),
-			offset: z.number().optional().describe("Skip N results"),
+		async ({ as_of }) => {
+			return handleMcp(async () => {
+				const result = await linkageTypes.listLinkageTypes(db, as_of);
+				const version = await doltHead(db);
+				return mcpOk(result, version);
+			});
 		},
-	}, async ({ item_id, limit, offset }) => {
-		return text(await doltItemHistory(db, item_id, { limit, offset }));
-	});
+	);
+
+	server.registerTool(
+		"create_linkage_type",
+		{
+			description: "Create a new linkage type",
+			inputSchema: {
+				name: z.string().describe("Type name (unique)"),
+				version: z.string().optional().describe("Expected HEAD commit hash"),
+			},
+		},
+		async ({ name, version }) => {
+			return handleMcp(async () => {
+				const head = await checkVersion(db, version);
+				if (head) return mcpErr("CONFLICT", "Conflict", { head });
+				const id = crypto.randomUUID();
+				const { result, commitHash } = await withAutoCommit(
+					db,
+					`Create linkage type '${name}'`,
+					() => linkageTypes.createLinkageType(db, id, name),
+				);
+				return mcpOk(result, commitHash);
+			});
+		},
+	);
+
+	server.registerTool(
+		"delete_linkage_type",
+		{
+			description: "Delete a linkage type (fails if in use)",
+			inputSchema: {
+				id: z.string().describe("Linkage type ID"),
+				version: z.string().optional().describe("Expected HEAD commit hash"),
+			},
+		},
+		async ({ id, version }) => {
+			return handleMcp(async () => {
+				const head = await checkVersion(db, version);
+				if (head) return mcpErr("CONFLICT", "Conflict", { head });
+				const { commitHash } = await withAutoCommit(
+					db,
+					`Delete linkage type ${id}`,
+					() => linkageTypes.deleteLinkageType(db, id),
+				);
+				return mcpOk({ deleted: id }, commitHash);
+			});
+		},
+	);
 }

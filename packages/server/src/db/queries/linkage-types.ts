@@ -1,4 +1,5 @@
 import type { Kysely } from "kysely";
+import { asOfTable } from "../../lib/dolt.ts";
 import { InUseError, NotFoundError } from "../../lib/errors.ts";
 import type { Database } from "../schema.ts";
 
@@ -11,9 +12,9 @@ export async function createLinkageType(
 	return getLinkageType(db, id);
 }
 
-export async function listLinkageTypes(db: Kysely<Database>) {
+export async function listLinkageTypes(db: Kysely<Database>, asOf?: string) {
 	return db
-		.selectFrom("linkage_types")
+		.selectFrom(asOfTable("linkage_types", asOf))
 		.selectAll()
 		.orderBy("name", "asc")
 		.execute();

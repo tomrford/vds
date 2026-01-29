@@ -1,20 +1,12 @@
-import type { Kysely } from "kysely";
+import type { AliasedRawBuilder, Kysely } from "kysely";
 import { sql } from "kysely";
 import type { Database } from "../db/schema.ts";
-import { NotFoundError } from "./errors.ts";
 
 export interface DoltCommitInfo {
 	hash: string;
 	committer: string;
 	message: string;
 	date: string;
-}
-
-export interface DoltDiffItem {
-	table: string;
-	diff_type: string;
-	from_id: string | null;
-	to_id: string | null;
 }
 
 /** Get current HEAD commit hash. */
@@ -60,58 +52,21 @@ export async function withAutoCommit<T>(
 	return { result, commitHash };
 }
 
-/** List commits from Dolt log with optional pagination. */
-export async function doltLog(
-	db: Kysely<Database>,
-	opts?: { limit?: number; offset?: number },
-): Promise<DoltCommitInfo[]> {
-	const limit = opts?.limit ?? 50;
-	const offset = opts?.offset ?? 0;
-
-	const result = await sql<DoltCommitInfo>`
-		SELECT commit_hash AS hash, committer, message, date
-		FROM dolt_log
-		ORDER BY date DESC
-		LIMIT ${limit} OFFSET ${offset}
-	`.execute(db);
-
-	return result.rows;
-}
-
-/** Get a single commit's details by hash. */
-export async function doltCommitDetails(
-	db: Kysely<Database>,
-	hash: string,
-): Promise<DoltCommitInfo> {
-	const result = await sql<DoltCommitInfo>`
-		SELECT commit_hash AS hash, committer, message, date
-		FROM dolt_log
-		WHERE commit_hash = ${hash}
-	`.execute(db);
-
-	const row = result.rows[0];
-	if (!row) throw new NotFoundError("commit", hash);
-	return row;
-}
-
-/** Get commits that changed a specific item (by scanning dolt_diff tables). */
-export async function doltItemHistory(
-	db: Kysely<Database>,
-	itemId: string,
-	opts?: { limit?: number; offset?: number },
-): Promise<DoltCommitInfo[]> {
-	const limit = opts?.limit ?? 50;
-	const offset = opts?.offset ?? 0;
-
-	// Find commits that touched this item in dolt_diff_items
-	const result = await sql<DoltCommitInfo>`
-		SELECT DISTINCT l.commit_hash AS hash, l.committer, l.message, l.date
-		FROM dolt_log AS l
-		JOIN dolt_diff_items AS d ON d.to_commit = l.commit_hash
-		WHERE d.from_id = ${itemId} OR d.to_id = ${itemId}
-		ORDER BY l.date DESC
-		LIMIT ${limit} OFFSET ${offset}
-	`.execute(db);
-
-	return result.rows;
+/** Build a table expression with optional AS OF clause for point-in-time queries. */
+export function asOfTable<T extends keyof Database>(
+	table: T,
+	asOf?: string,
+): AliasedRawBuilder<Database[T], T> {
+	const base = sql.table(table);
+	if (!asOf) return base.as(table) as AliasedRawBuilder<Database[T], T>;
+	if (asOf.includes("T") || /^\d{4}-/.test(asOf)) {
+		return sql`${base} AS OF TIMESTAMP(${asOf})`.as(table) as AliasedRawBuilder<
+			Database[T],
+			T
+		>;
+	}
+	return sql`${base} AS OF ${asOf}`.as(table) as AliasedRawBuilder<
+		Database[T],
+		T
+	>;
 }

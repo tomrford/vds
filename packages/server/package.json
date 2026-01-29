@@ -8,6 +8,7 @@
 		"test": "bun test"
 	},
 	"dependencies": {
+		"@hono/mcp": "^0.2.3",
 		"@modelcontextprotocol/sdk": "1.25.3",
 		"hono": "^4",
 		"kysely": "^0.27",

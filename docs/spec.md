@@ -4,23 +4,24 @@ A local-first, version-controlled data store for managing interconnected items w
 
 ## Overview
 
-A generic data kernel that stores items (text blobs) with typed attributes and typed linkages between them. All mutations are automatically version-controlled via Dolt - every write is a commit, giving you full history for free.
+A generic data kernel that stores items (text blobs) with typed attributes and typed linkages between them. All mutations are automatically version-controlled via Dolt - every write is a commit, and point-in-time reads are available via `?as_of`.
 
 The server exposes two interfaces:
+
 - **REST API** - for any HTTP client (CLI, desktop UI, scripts)
 - **MCP server** - for AI agents (Claude, Cursor, etc.)
 
-Versioning is internal - history is readable but not directly manipulable by users. No branching/merging exposed in v1.
+Versioning is internal - no branching/merging exposed in v1. Historical reads are exposed via `?as_of`.
 
 ## Tech Stack
 
-| Layer | Choice | Rationale |
-|-------|--------|-----------|
-| Database | Dolt | Git-like versioning, MySQL-compatible, 1.1x MySQL perf |
-| Runtime | Bun | Fast, native TS, good DX |
-| Query builder | Kysely | Type-safe, flexible for raw SQL (version control queries) |
-| API | Hono | Lightweight, Bun-native |
-| MCP | @modelcontextprotocol/sdk | Standard agent interface |
+| Layer         | Choice                    | Rationale                                                 |
+| ------------- | ------------------------- | --------------------------------------------------------- |
+| Database      | Dolt                      | Git-like versioning, MySQL-compatible, 1.1x MySQL perf    |
+| Runtime       | Bun                       | Fast, native TS, good DX                                  |
+| Query builder | Kysely                    | Type-safe, flexible for raw SQL (version control queries) |
+| API           | Hono                      | Lightweight, Bun-native                                   |
+| MCP           | @modelcontextprotocol/sdk | Standard agent interface                                  |
 
 ## Data Model
 
@@ -82,16 +83,15 @@ All responses are JSON. Errors return `{ error: string, details?: any }`.
 
 ```
 POST   /items                     Create item { body }
-GET    /items                     List items (?attr.status=done, ?limit, ?offset)
-GET    /items/:id                 Get item (?include=attributes,linkages)
-PATCH  /items/:id                 Update item { body }
+GET    /items                     List items (?attr.status=done, ?limit, ?offset, ?as_of)
+GET    /items/:id                 Get item (?as_of) — includes attributes + linkages
+PATCH  /items/:id                 Update item { body?, attributes? { set?, remove? } }
 DELETE /items/:id                 Delete item (cascades)
 ```
 
 ### Attributes
 
 ```
-GET    /items/:id/attributes      List attributes for item
 POST   /items/:id/attributes      Add attribute { type_id, value }
 PATCH  /attributes/:id            Update attribute { value }
 DELETE /attributes/:id            Remove attribute
@@ -100,7 +100,7 @@ DELETE /attributes/:id            Remove attribute
 ### Attribute Types
 
 ```
-GET    /attribute-types           List all types
+GET    /attribute-types           List all types (?as_of)
 POST   /attribute-types           Create type { name }
 DELETE /attribute-types/:id       Delete type (fails if in use)
 ```
@@ -108,7 +108,7 @@ DELETE /attribute-types/:id       Delete type (fails if in use)
 ### Linkages
 
 ```
-GET    /items/:id/linkages        Get linkages (?direction=source|target|both)
+GET    /linkages                  List linkages (?type_id, ?source_id, ?target_id, ?limit, ?offset, ?as_of)
 POST   /linkages                  Create linkage { source_id, target_id, type_id }
 DELETE /linkages/:id              Remove linkage
 ```
@@ -116,17 +116,9 @@ DELETE /linkages/:id              Remove linkage
 ### Linkage Types
 
 ```
-GET    /linkage-types             List all types
+GET    /linkage-types             List all types (?as_of)
 POST   /linkage-types             Create type { name }
 DELETE /linkage-types/:id         Delete type (fails if in use)
-```
-
-### History (read-only)
-
-```
-GET    /history                   List commits (?limit, ?offset)
-GET    /history/:commit           Get commit details
-GET    /items/:id/history         Get item's change history
 ```
 
 ### Optimistic Locking (optional)
@@ -135,40 +127,45 @@ Pass `If-Match: <commit-hash>` header on mutations. Server rejects if HEAD has m
 
 ## MCP Tools
 
-Direct mapping to REST endpoints.
+Mounted on `/mcp` using Streamable HTTP transport. Responses are JSON envelopes:
+
+```
+{ "data": ..., "version": "<commit-hash>" }
+```
+
+Errors return:
+
+```
+{ "error": { "code": "...", "message": "...", "details": ... } }
+```
+
+Mutations accept an optional `version` field to enable optimistic locking.
 
 ### Items
-- `create_item(body)` → POST /items
-- `list_items(filters?)` → GET /items
-- `get_item(id, include?)` → GET /items/:id
-- `update_item(id, body)` → PATCH /items/:id
-- `delete_item(id)` → DELETE /items/:id
 
-### Attributes
-- `list_attributes(item_id)` → GET /items/:id/attributes
-- `add_attribute(item_id, type_id, value)` → POST /items/:id/attributes
-- `update_attribute(id, value)` → PATCH /attributes/:id
-- `remove_attribute(id)` → DELETE /attributes/:id
+- `create_item(body, version?)` → POST /items
+- `list_items(filters?, as_of?)` → GET /items
+- `get_item(id, as_of?)` → GET /items/:id
+- `update_item(id, body?, attributes?, version?)` → PATCH /items/:id
+- `delete_item(id, version?)` → DELETE /items/:id
 
 ### Attribute Types
-- `list_attribute_types()` → GET /attribute-types
-- `create_attribute_type(name)` → POST /attribute-types
-- `delete_attribute_type(id)` → DELETE /attribute-types/:id
+
+- `list_attribute_types(as_of?)` → GET /attribute-types
+- `create_attribute_type(name, version?)` → POST /attribute-types
+- `delete_attribute_type(id, version?)` → DELETE /attribute-types/:id
 
 ### Linkages
-- `list_linkages(item_id, direction?)` → GET /items/:id/linkages
-- `create_linkage(source_id, target_id, type_id)` → POST /linkages
-- `remove_linkage(id)` → DELETE /linkages/:id
+
+- `list_linkages(type_id?, source_id?, target_id?, limit?, offset?, as_of?)` → GET /linkages
+- `create_linkages(linkages[], version?)` → POST /linkages
+- `remove_linkages(ids[], version?)` → DELETE /linkages/:id
 
 ### Linkage Types
-- `list_linkage_types()` → GET /linkage-types
-- `create_linkage_type(name)` → POST /linkage-types
-- `delete_linkage_type(id)` → DELETE /linkage-types/:id
 
-### History
-- `list_commits(limit?)` → GET /history
-- `get_commit(hash)` → GET /history/:commit
-- `get_item_history(item_id)` → GET /items/:id/history
+- `list_linkage_types(as_of?)` → GET /linkage-types
+- `create_linkage_type(name, version?)` → POST /linkage-types
+- `delete_linkage_type(id, version?)` → DELETE /linkage-types/:id
 
 ## Versioning Behavior
 
@@ -183,10 +180,11 @@ create_linkage: "Link <source_id> -> <target_id> (<type_name>)"
 ...etc
 ```
 
-History is append-only and read-only from the API. No branching, merging, or checkout exposed. Dolt's versioning provides:
-- Full audit trail
-- Point-in-time queries (via Dolt's `AS OF` internally)
-- Implicit soft-deletes (recover from history)
+History is append-only and internal. No branching, merging, or checkout exposed. Dolt's versioning provides:
+
+- Full audit trail (via Dolt)
+- Point-in-time queries (`?as_of` on GETs)
+- Implicit soft-deletes (recover by reading past state)
 
 ## Project Structure
 
@@ -207,7 +205,7 @@ vds/
 │   │   │   │   ├── server.ts # MCP server
 │   │   │   │   └── tools/    # Tool definitions
 │   │   │   └── lib/
-│   │   │       ├── dolt.ts   # Dolt-specific queries (commit, history)
+│   │   │       ├── dolt.ts   # Dolt helpers (commit, as_of)
 │   │   │       └── errors.ts # Error types
 │   │   ├── package.json
 │   │   └── tsconfig.json
@@ -224,27 +222,29 @@ vds/
 ## Development Phases
 
 ### Phase 1: Core
+
 - [ ] Dolt running in Docker
 - [ ] Kysely schema and connection
 - [ ] CRUD queries for all tables
 - [ ] Auto-commit wrapper
 
 ### Phase 2: REST API
+
 - [ ] Hono app with all routes
 - [ ] Query parameter filtering
-- [ ] Include parameter (attributes, linkages)
+- [ ] Inline attributes/linkages + ?as_of on GETs
 - [ ] Error handling
 - [ ] Optimistic locking (If-Match)
 
 ### Phase 3: MCP
+
 - [ ] MCP server setup
 - [ ] All tools implemented
 - [ ] Test with Claude
 
-### Phase 4: History
-- [ ] Commit list endpoint
-- [ ] Item history endpoint
-- [ ] Point-in-time queries (internal use)
+### Phase 4: Versioned reads
+
+- [ ] Point-in-time queries (`?as_of`)
 
 ## Configuration
 

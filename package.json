@@ -1,8 +1,13 @@
 {
 	"name": "vds",
 	"private": true,
-	"workspaces": ["packages/*"],
+	"workspaces": [
+		"packages/*"
+	],
 	"scripts": {
+		"dev": "concurrently -k -n dolt,server -c blue,green \"bash scripts/dolt-dev.sh\" \"sleep 2 && bun run --hot packages/server/src/main.ts\"",
+		"dev:server": "bun run --hot packages/server/src/main.ts",
+		"dev:dolt": "bash scripts/dolt-dev.sh",
 		"check": "biome check .",
 		"check:fix": "biome check --fix .",
 		"lint": "biome lint .",
@@ -14,7 +19,8 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.13",
-		"@types/bun": "latest"
+		"@types/bun": "latest",
+		"concurrently": "9.2.1"
 	},
 	"peerDependencies": {
 		"typescript": "^5"

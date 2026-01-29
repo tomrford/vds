@@ -2,12 +2,12 @@ import { Hono } from "hono";
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import { AppError } from "../lib/errors.ts";
-import { itemRoutes } from "./routes/items.ts";
+import { mcpRoutes } from "./mcp.ts";
 import { attributeTypeRoutes } from "./routes/attribute-types.ts";
 import { attributeRoutes } from "./routes/attributes.ts";
+import { itemRoutes } from "./routes/items.ts";
 import { linkageTypeRoutes } from "./routes/linkage-types.ts";
 import { linkageRoutes } from "./routes/linkages.ts";
-import { historyRoutes } from "./routes/history.ts";
 
 export type Env = { Variables: { db: Kysely<Database> } };
 
@@ -26,13 +26,16 @@ export function createApp(db: Kysely<Database>) {
 	app.route("/attributes", attributeRoutes);
 	app.route("/linkage-types", linkageTypeRoutes);
 	app.route("/linkages", linkageRoutes);
-	app.route("/history", historyRoutes);
+	app.route("/mcp", mcpRoutes);
 
 	// Global error handler
 	app.onError((err, c) => {
 		if (err instanceof AppError) {
 			return c.json(
-				{ error: err.message, ...(err.details ? { details: err.details } : {}) },
+				{
+					error: err.message,
+					...(err.details ? { details: err.details } : {}),
+				},
 				err.status as 400,
 			);
 		}

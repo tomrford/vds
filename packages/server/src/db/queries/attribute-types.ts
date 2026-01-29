@@ -1,4 +1,5 @@
 import type { Kysely } from "kysely";
+import { asOfTable } from "../../lib/dolt.ts";
 import { InUseError, NotFoundError } from "../../lib/errors.ts";
 import type { Database } from "../schema.ts";
 
@@ -11,9 +12,9 @@ export async function createAttributeType(
 	return getAttributeType(db, id);
 }
 
-export async function listAttributeTypes(db: Kysely<Database>) {
+export async function listAttributeTypes(db: Kysely<Database>, asOf?: string) {
 	return db
-		.selectFrom("attribute_types")
+		.selectFrom(asOfTable("attribute_types", asOf))
 		.selectAll()
 		.orderBy("name", "asc")
 		.execute();
@@ -44,5 +45,6 @@ export async function deleteAttributeType(db: Kysely<Database>, id: string) {
 		.deleteFrom("attribute_types")
 		.where("id", "=", id)
 		.executeTakeFirst();
-	if (result.numDeletedRows === 0n) throw new NotFoundError("attribute_type", id);
+	if (result.numDeletedRows === 0n)
+		throw new NotFoundError("attribute_type", id);
 }

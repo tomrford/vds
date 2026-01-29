@@ -9,6 +9,7 @@ import {
 	createLinkage,
 	deleteLinkage,
 	listLinkages,
+	listLinkagesForItem,
 } from "./linkages.ts";
 
 let db: Kysely<Database>;
@@ -33,19 +34,22 @@ describe("linkages", () => {
 		expect(link.source_id).toBe(a.id);
 		expect(link.target_id).toBe(b.id);
 
-		const fromSource = await listLinkages(db, a.id, "source");
+		const fromSource = await listLinkagesForItem(db, a.id, "source");
 		expect(fromSource.length).toBe(1);
 
-		const fromTarget = await listLinkages(db, b.id, "target");
+		const fromTarget = await listLinkagesForItem(db, b.id, "target");
 		expect(fromTarget.length).toBe(1);
 
-		const both = await listLinkages(db, a.id, "both");
+		const both = await listLinkagesForItem(db, a.id, "both");
 		expect(both.length).toBe(1);
+
+		const flat = await listLinkages(db, { sourceId: a.id });
+		expect(flat.length).toBe(1);
 	});
 
 	test("delete", async () => {
 		await deleteLinkage(db, "link-1");
-		expect(listLinkages(db, "l-item-1")).resolves.toHaveLength(0);
+		expect(listLinkagesForItem(db, "l-item-1")).resolves.toHaveLength(0);
 	});
 
 	test("delete nonexistent throws", async () => {

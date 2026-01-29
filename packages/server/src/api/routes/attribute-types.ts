@@ -1,14 +1,15 @@
 import { Hono } from "hono";
-import type { Env } from "../app.ts";
 import * as attributeTypes from "../../db/queries/attribute-types.ts";
 import { withAutoCommit } from "../../lib/dolt.ts";
+import type { Env } from "../app.ts";
 
 export const attributeTypeRoutes = new Hono<Env>();
 
 /** GET /attribute-types — List all types */
 attributeTypeRoutes.get("/", async (c) => {
 	const db = c.get("db");
-	const result = await attributeTypes.listAttributeTypes(db);
+	const asOf = c.req.query("as_of");
+	const result = await attributeTypes.listAttributeTypes(db, asOf);
 	return c.json(result);
 });
 

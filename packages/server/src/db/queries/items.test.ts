@@ -39,6 +39,7 @@ describe("items", () => {
 		await createItem(db, "test-id-2", "second item");
 		const all = await listItems(db);
 		expect(all.length).toBeGreaterThanOrEqual(2);
+		expect(all[0]?.attributes).toBeArray();
 	});
 
 	test("list with limit/offset", async () => {

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import type { Env } from "../app.ts";
 import * as attributes from "../../db/queries/attributes.ts";
 import { withAutoCommit } from "../../lib/dolt.ts";
+import type { Env } from "../app.ts";
 
 export const attributeRoutes = new Hono<Env>();
 

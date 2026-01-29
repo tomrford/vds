@@ -1,14 +1,15 @@
 import { Hono } from "hono";
-import type { Env } from "../app.ts";
 import * as linkageTypes from "../../db/queries/linkage-types.ts";
 import { withAutoCommit } from "../../lib/dolt.ts";
+import type { Env } from "../app.ts";
 
 export const linkageTypeRoutes = new Hono<Env>();
 
 /** GET /linkage-types — List all types */
 linkageTypeRoutes.get("/", async (c) => {
 	const db = c.get("db");
-	const result = await linkageTypes.listLinkageTypes(db);
+	const asOf = c.req.query("as_of");
+	const result = await linkageTypes.listLinkageTypes(db, asOf);
 	return c.json(result);
 });
 

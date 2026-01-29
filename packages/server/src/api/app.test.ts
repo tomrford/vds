@@ -42,6 +42,7 @@ async function jsonBody(res: Response): Promise<Any> {
 
 describe("items CRUD", () => {
 	let itemId: string;
+	let createdHash: string | null = null;
 
 	test("POST /items", async () => {
 		const res = await post("/items", { body: "test item" });
@@ -49,7 +50,8 @@ describe("items CRUD", () => {
 		const data: Any = await jsonBody(res);
 		expect(data.body).toBe("test item");
 		expect(data.id).toBeDefined();
-		expect(res.headers.get("etag")).toBeTruthy();
+		createdHash = res.headers.get("etag");
+		expect(createdHash).toBeTruthy();
 		itemId = data.id;
 	});
 
@@ -58,6 +60,7 @@ describe("items CRUD", () => {
 		expect(res.status).toBe(200);
 		const data: Any = await jsonBody(res);
 		expect(data.length).toBeGreaterThanOrEqual(1);
+		expect(data[0].attributes).toBeArray();
 	});
 
 	test("GET /items?limit=1", async () => {
@@ -73,11 +76,6 @@ describe("items CRUD", () => {
 		const data: Any = await jsonBody(res);
 		expect(data.id).toBe(itemId);
 		expect(data.body).toBe("test item");
-	});
-
-	test("GET /items/:id?include=attributes,linkages", async () => {
-		const res = await req(`/items/${itemId}?include=attributes,linkages`);
-		const data: Any = await jsonBody(res);
 		expect(data.attributes).toBeArray();
 		expect(data.linkages).toBeArray();
 	});
@@ -92,6 +90,21 @@ describe("items CRUD", () => {
 		const data: Any = await jsonBody(res);
 		expect(data.body).toBe("updated");
 		expect(res.headers.get("etag")).toBeTruthy();
+	});
+
+	test("GET /items/:id?as_of=hash", async () => {
+		const res = await req(`/items/${itemId}?as_of=${createdHash ?? ""}`);
+		expect(res.status).toBe(200);
+		const data: Any = await jsonBody(res);
+		expect(data.body).toBe("test item");
+	});
+
+	test("GET /items?as_of=hash", async () => {
+		const res = await req(`/items?as_of=${createdHash ?? ""}`);
+		expect(res.status).toBe(200);
+		const data: Any = await jsonBody(res);
+		const match = data.find((item: Any) => item.id === itemId);
+		expect(match?.body).toBe("test item");
 	});
 
 	test("GET /items/:id — 404", async () => {
@@ -111,12 +124,14 @@ describe("items CRUD", () => {
 
 describe("attribute types", () => {
 	let typeId: string;
+	let createHash: string | null = null;
 
 	test("POST /attribute-types", async () => {
 		const res = await post("/attribute-types", { name: "status" });
 		expect(res.status).toBe(201);
 		const data: Any = await jsonBody(res);
 		expect(data.name).toBe("status");
+		createHash = res.headers.get("etag");
 		typeId = data.id;
 	});
 
@@ -132,6 +147,14 @@ describe("attribute types", () => {
 			method: "DELETE",
 		});
 		expect(res.status).toBe(204);
+	});
+
+	test("GET /attribute-types?as_of=hash", async () => {
+		const res = await req(`/attribute-types?as_of=${createHash ?? ""}`);
+		expect(res.status).toBe(200);
+		const data: Any = await jsonBody(res);
+		const match = data.find((type: Any) => type.id === typeId);
+		expect(match?.name).toBe("status");
 	});
 });
 
@@ -150,24 +173,21 @@ describe("attributes", () => {
 		typeId = type.id;
 	});
 
-	test("POST /items/:id/attributes", async () => {
-		const res = await post(`/items/${itemId}/attributes`, {
-			type_id: typeId,
-			value: "high",
+	test("PATCH /items/:id attributes.set", async () => {
+		const res = await app.request(`/items/${itemId}`, {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				attributes: { set: [{ type_id: typeId, value: "high" }] },
+			}),
 		});
-		expect(res.status).toBe(201);
-		const data: Any = await jsonBody(res);
-		expect(data.value).toBe("high");
-		expect(data.item_id).toBe(itemId);
-		attrId = data.id;
-	});
-
-	test("GET /items/:id/attributes", async () => {
-		const res = await req(`/items/${itemId}/attributes`);
 		expect(res.status).toBe(200);
-		const data: Any = await jsonBody(res);
-		expect(data.length).toBe(1);
-		expect(data[0].value).toBe("high");
+
+		const getRes = await req(`/items/${itemId}`);
+		const data: Any = await jsonBody(getRes);
+		expect(data.attributes.length).toBe(1);
+		expect(data.attributes[0].value).toBe("high");
+		attrId = data.attributes[0].id;
 	});
 
 	test("PATCH /attributes/:id", async () => {
@@ -187,6 +207,28 @@ describe("attributes", () => {
 		});
 		expect(res.status).toBe(204);
 	});
+
+	test("PATCH /items/:id attributes.remove", async () => {
+		await app.request(`/items/${itemId}`, {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				attributes: { set: [{ type_id: typeId, value: "low" }] },
+			}),
+		});
+
+		const res = await app.request(`/items/${itemId}`, {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				attributes: { remove: [typeId] },
+			}),
+		});
+		expect(res.status).toBe(200);
+		const getRes = await req(`/items/${itemId}`);
+		const data: Any = await jsonBody(getRes);
+		expect(data.attributes.length).toBe(0);
+	});
 });
 
 describe("attribute filtering", () => {
@@ -197,16 +239,22 @@ describe("attribute filtering", () => {
 
 		const r1 = await post("/items", { body: "red item" });
 		const item1: Any = await jsonBody(r1);
-		await post(`/items/${item1.id}/attributes`, {
-			type_id: typeId,
-			value: "red",
+		await app.request(`/items/${item1.id}`, {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				attributes: { set: [{ type_id: typeId, value: "red" }] },
+			}),
 		});
 
 		const r2 = await post("/items", { body: "blue item" });
 		const item2: Any = await jsonBody(r2);
-		await post(`/items/${item2.id}/attributes`, {
-			type_id: typeId,
-			value: "blue",
+		await app.request(`/items/${item2.id}`, {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				attributes: { set: [{ type_id: typeId, value: "blue" }] },
+			}),
 		});
 	});
 
@@ -251,6 +299,7 @@ describe("linkages", () => {
 	let targetId: string;
 	let typeId: string;
 	let linkageId: string;
+	let createHash: string | null = null;
 
 	beforeAll(async () => {
 		const r1: Any = await jsonBody(await post("/items", { body: "source" }));
@@ -273,26 +322,28 @@ describe("linkages", () => {
 		const data: Any = await jsonBody(res);
 		expect(data.source_id).toBe(sourceId);
 		expect(data.target_id).toBe(targetId);
+		createHash = res.headers.get("etag");
 		linkageId = data.id;
 	});
 
-	test("GET /items/:id/linkages", async () => {
-		const res = await req(`/items/${sourceId}/linkages`);
+	test("GET /linkages?source_id", async () => {
+		const res = await req(`/linkages?source_id=${sourceId}`);
 		expect(res.status).toBe(200);
 		const data: Any = await jsonBody(res);
 		expect(data.length).toBe(1);
 	});
 
-	test("GET /items/:id/linkages?direction=source", async () => {
-		const res = await req(`/items/${sourceId}/linkages?direction=source`);
+	test("GET /linkages?target_id", async () => {
+		const res = await req(`/linkages?target_id=${targetId}`);
 		const data: Any = await jsonBody(res);
 		expect(data.length).toBe(1);
 	});
 
-	test("GET /items/:id/linkages?direction=target (from source)", async () => {
-		const res = await req(`/items/${sourceId}/linkages?direction=target`);
+	test("GET /items/:id includes linkages", async () => {
+		const res = await req(`/items/${sourceId}`);
 		const data: Any = await jsonBody(res);
-		expect(data.length).toBe(0);
+		expect(data.linkages).toBeArray();
+		expect(data.linkages.length).toBe(1);
 	});
 
 	test("DELETE /linkages/:id", async () => {
@@ -300,6 +351,14 @@ describe("linkages", () => {
 			method: "DELETE",
 		});
 		expect(res.status).toBe(204);
+	});
+
+	test("GET /linkages?as_of=hash", async () => {
+		const res = await req(`/linkages?as_of=${createHash ?? ""}`);
+		expect(res.status).toBe(200);
+		const data: Any = await jsonBody(res);
+		const match = data.find((linkage: Any) => linkage.id === linkageId);
+		expect(match?.id).toBe(linkageId);
 	});
 
 	test("DELETE /linkage-types/:id — in use fails", async () => {
@@ -314,71 +373,6 @@ describe("linkages", () => {
 			method: "DELETE",
 		});
 		expect(res.status).toBe(409);
-	});
-});
-
-describe("history", () => {
-	let itemId: string;
-
-	beforeAll(async () => {
-		const r: Any = await jsonBody(await post("/items", { body: "history test" }));
-		itemId = r.id;
-		// Make a second commit by updating
-		await app.request(`/items/${itemId}`, {
-			method: "PATCH",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ body: "history updated" }),
-		});
-	});
-
-	test("GET /history — lists commits", async () => {
-		const res = await req("/history");
-		expect(res.status).toBe(200);
-		const data: Any = await jsonBody(res);
-		expect(data.length).toBeGreaterThanOrEqual(2);
-		expect(data[0].hash).toBeTruthy();
-		expect(data[0].message).toBeTruthy();
-		expect(data[0].date).toBeTruthy();
-	});
-
-	test("GET /history?limit=2", async () => {
-		const res = await req("/history?limit=2");
-		const data: Any = await jsonBody(res);
-		expect(data.length).toBeLessThanOrEqual(2);
-	});
-
-	test("GET /history/:commit — get commit details", async () => {
-		const logRes = await req("/history?limit=1");
-		const log: Any = await jsonBody(logRes);
-		const hash = log[0].hash;
-
-		const res = await req(`/history/${hash}`);
-		expect(res.status).toBe(200);
-		const data: Any = await jsonBody(res);
-		expect(data.hash).toBe(hash);
-		expect(data.message).toBeTruthy();
-	});
-
-	test("GET /history/:commit — 404 for unknown", async () => {
-		const res = await req("/history/0000000000000000000000000000000000000000");
-		expect(res.status).toBe(404);
-	});
-
-	test("GET /items/:id/history — item change history", async () => {
-		const res = await req(`/items/${itemId}/history`);
-		expect(res.status).toBe(200);
-		const data: Any = await jsonBody(res);
-		expect(data.length).toBeGreaterThanOrEqual(1);
-		// Should include commits that touched this item
-		for (const commit of data) {
-			expect(commit.hash).toBeTruthy();
-			expect(commit.message).toBeTruthy();
-		}
-	});
-
-	test("GET /items/:id/history — 404 for unknown item", async () => {
-		const res = await req("/items/nonexistent/history");
-		expect(res.status).toBe(404);
 	});
 });
 
