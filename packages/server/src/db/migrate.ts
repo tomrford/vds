@@ -54,4 +54,12 @@ export async function migrate(db: Kysely<Database>): Promise<void> {
 			FOREIGN KEY (type_id) REFERENCES linkage_types(id) ON DELETE RESTRICT
 		)
 	`.execute(db);
+
+	await sql`
+		CREATE TABLE IF NOT EXISTS schema_blob (
+			id          VARCHAR(36) PRIMARY KEY,
+			body        TEXT NOT NULL,
+			created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`.execute(db);
 }

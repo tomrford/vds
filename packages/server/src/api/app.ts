@@ -8,6 +8,7 @@ import { attributeRoutes } from "./routes/attributes.ts";
 import { itemRoutes } from "./routes/items.ts";
 import { linkageTypeRoutes } from "./routes/linkage-types.ts";
 import { linkageRoutes } from "./routes/linkages.ts";
+import { schemaRoutes } from "./routes/schema.ts";
 
 export type Env = { Variables: { db: Kysely<Database> } };
 
@@ -26,6 +27,7 @@ export function createApp(db: Kysely<Database>) {
 	app.route("/attributes", attributeRoutes);
 	app.route("/linkage-types", linkageTypeRoutes);
 	app.route("/linkages", linkageRoutes);
+	app.route("/schema", schemaRoutes);
 	app.route("/mcp", mcpRoutes);
 
 	// Global error handler

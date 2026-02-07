@@ -39,6 +39,7 @@ export async function setupTestDb(): Promise<TestDb> {
 			await sql`DELETE FROM items`.execute(db);
 			await sql`DELETE FROM linkage_types`.execute(db);
 			await sql`DELETE FROM attribute_types`.execute(db);
+			await sql`DELETE FROM schema_blob`.execute(db);
 			await db.destroy();
 		},
 	};

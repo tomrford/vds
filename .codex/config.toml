@@ -1,0 +1,3 @@
+[mcp_servers.vds]
+type = "http"
+url = "http://localhost:3000/mcp"

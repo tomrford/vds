@@ -376,6 +376,49 @@ describe("linkages", () => {
 	});
 });
 
+describe("schema blob", () => {
+	let v1Hash: string | null = null;
+
+	test("GET /schema returns null body when unset", async () => {
+		const res = await req("/schema");
+		expect(res.status).toBe(200);
+		const data: Any = await jsonBody(res);
+		expect(data.body).toBeNull();
+	});
+
+	test("PUT /schema sets schema blob", async () => {
+		const res = await app.request("/schema", {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "types:\\n  requirement:\\n    attrs: []" }),
+		});
+		expect(res.status).toBe(200);
+		const data: Any = await jsonBody(res);
+		expect(data.body).toContain("requirement");
+		v1Hash = res.headers.get("etag");
+		expect(v1Hash).toBeTruthy();
+	});
+
+	test("GET /schema returns latest blob", async () => {
+		const res = await req("/schema");
+		const data: Any = await jsonBody(res);
+		expect(data.body).toContain("requirement");
+	});
+
+	test("GET /schema?as_of=hash returns previous blob", async () => {
+		const res2 = await app.request("/schema", {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "types:\\n  information:\\n    attrs: []" }),
+		});
+		expect(res2.status).toBe(200);
+
+		const res = await req(`/schema?as_of=${v1Hash ?? ""}`);
+		const data: Any = await jsonBody(res);
+		expect(data.body).toContain("requirement");
+	});
+});
+
 describe("optimistic locking", () => {
 	test("If-Match with stale hash returns 409", async () => {
 		const res = await app.request("/items", {

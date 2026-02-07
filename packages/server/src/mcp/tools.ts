@@ -6,6 +6,7 @@ import * as attributes from "../db/queries/attributes.ts";
 import * as items from "../db/queries/items.ts";
 import * as linkageTypes from "../db/queries/linkage-types.ts";
 import * as linkages from "../db/queries/linkages.ts";
+import * as schemaBlob from "../db/queries/schema-blob.ts";
 import type { Database } from "../db/schema.ts";
 import { doltHead, withAutoCommit } from "../lib/dolt.ts";
 import {
@@ -486,6 +487,51 @@ export function registerTools(server: McpServer, db: Kysely<Database>) {
 					() => linkageTypes.deleteLinkageType(db, id),
 				);
 				return mcpOk({ deleted: id }, commitHash);
+			});
+		},
+	);
+
+	// ── Schema Blob ───────────────────────────────────────
+
+	server.registerTool(
+		"get_schema",
+		{
+			description: "Get the schema blob",
+			inputSchema: {
+				as_of: z
+					.string()
+					.optional()
+					.describe("Commit hash or datetime for point-in-time read"),
+			},
+		},
+		async ({ as_of }) => {
+			return handleMcp(async () => {
+				const result = await schemaBlob.getSchemaBlob(db, as_of);
+				const version = await doltHead(db);
+				return mcpOk(result ?? { body: null }, version);
+			});
+		},
+	);
+
+	server.registerTool(
+		"set_schema",
+		{
+			description: "Set the schema blob",
+			inputSchema: {
+				body: z.string().describe("Schema blob text"),
+				version: z.string().optional().describe("Expected HEAD commit hash"),
+			},
+		},
+		async ({ body, version }) => {
+			return handleMcp(async () => {
+				const head = await checkVersion(db, version);
+				if (head) return mcpErr("CONFLICT", "Conflict", { head });
+				const { result, commitHash } = await withAutoCommit(
+					db,
+					"Set schema blob",
+					() => schemaBlob.setSchemaBlob(db, body),
+				);
+				return mcpOk(result ?? { body }, commitHash);
 			});
 		},
 	);

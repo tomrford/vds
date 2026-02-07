@@ -6,6 +6,7 @@
 	],
 	"scripts": {
 		"dev": "concurrently -k -n dolt,server -c blue,green \"bash scripts/dolt-dev.sh\" \"sleep 2 && bun run --hot packages/server/src/main.ts\"",
+		"watch": "bun run dev",
 		"dev:server": "bun run --hot packages/server/src/main.ts",
 		"dev:dolt": "bash scripts/dolt-dev.sh",
 		"check": "biome check .",

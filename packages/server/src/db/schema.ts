@@ -34,10 +34,17 @@ export interface LinkagesTable {
 	created_at: Generated<Date>;
 }
 
+export interface SchemaBlobTable {
+	id: string;
+	body: string;
+	created_at: Generated<Date>;
+}
+
 export interface Database {
 	items: ItemsTable;
 	attribute_types: AttributeTypesTable;
 	linkage_types: LinkageTypesTable;
 	attributes: AttributesTable;
 	linkages: LinkagesTable;
+	schema_blob: SchemaBlobTable;
 }

@@ -7,6 +7,7 @@ export * as attributes from "./db/queries/attributes.ts";
 export * as items from "./db/queries/items.ts";
 export * as linkageTypes from "./db/queries/linkage-types.ts";
 export * as linkages from "./db/queries/linkages.ts";
+export * as schemaBlob from "./db/queries/schema-blob.ts";
 // Re-export types
 export type { Database } from "./db/schema.ts";
 export {
