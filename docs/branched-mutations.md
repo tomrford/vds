@@ -119,3 +119,7 @@ Query `dolt_branches` table to find them.
 - Mutation with stale version that does conflict → CONFLICT
 - Orphan branch cleanup on startup
 - Lock timeout behavior (merge lock held too long)
+
+## Additional
+
+- We should possible add a 'get head' fetch so the user can get the latest head if they want to go directly to mutations (eg creating new things)
